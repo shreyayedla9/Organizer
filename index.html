@@ -699,6 +699,7 @@ function save(){
   localStorage.setItem('acc_water',    water);
   localStorage.setItem('acc_wgoal',    wGoal);
   localStorage.setItem('acc_streak',   streak);
+  syncAll();
 }
 
 // ─── TAGS ────────────────────────────────────────────────────────────────────
@@ -1154,28 +1155,7 @@ async function syncAll(){
       pushToBackend('/daytasks', dayTasks),
       pushToBackend('/water', {count:water, goal:wGoal}),
     ]);
-    const statusEl = document.getElementById('cfg-status');
-    if(statusEl) statusEl.textContent='✓ Synced to backend — SMS active';
-    document.getElementById('sms-lbl').textContent='SMS: live';
   }catch(e){ console.warn('Sync error:', e); }
-}
-
-// Override save to also push to backend
-const _origSave = save;
-function save(){
-  _origSave && _origSave();
-  localStorage.setItem('acc_tasks',    JSON.stringify(tasks));
-  localStorage.setItem('acc_goals',    JSON.stringify(goals));
-  localStorage.setItem('acc_habits',   JSON.stringify(habits));
-  localStorage.setItem('acc_habitlog', JSON.stringify(habitLog));
-  localStorage.setItem('acc_adhocs',   JSON.stringify(adhocs));
-  localStorage.setItem('acc_daytasks', JSON.stringify(dayTasks));
-  localStorage.setItem('acc_logs',     JSON.stringify(logs_));
-  localStorage.setItem('acc_tags',     JSON.stringify(tags));
-  localStorage.setItem('acc_water',    water);
-  localStorage.setItem('acc_wgoal',    wGoal);
-  localStorage.setItem('acc_streak',   streak);
-  if(cfg.backendUrl) syncAll();
 }
 
 async function previewClaude(){const key=document.getElementById('cfg-claude').value.trim();if(!key){document.getElementById('cfg-status').textContent='Enter your Claude API key first';return;}document.getElementById('cfg-status').textContent='Generating…';const missed=habits.filter(h=>!(habitLog[todayKey()]&&habitLog[todayKey()][h.id])).map(h=>h.name).join(', ')||'protein, GMAT prep, startup work';try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:200,messages:[{role:'user',content:`You are a brutally honest accountability coach texting Shreya. She missed: ${missed}. Goals: Wharton/HBS MBA, startup, IB/PE, GMAT 685. ONE SMS, 2-3 sentences, specific, stings a little.`}]})});const d=await r.json();const msg=d.content&&d.content[0]&&d.content[0].text;document.getElementById('cfg-status').textContent=msg?`Preview: "${msg}"`:'Connected — check key';}catch(e){document.getElementById('cfg-status').textContent='Error: '+e.message;}}
