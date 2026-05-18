@@ -619,6 +619,10 @@ input[type="date"],input[type="datetime-local"]{color-scheme:dark;}
       <div class="card" style="margin-bottom:11px;">
         <div class="ct">Deploy backend</div>
         <p style="font-size:13px;color:var(--ink3);line-height:1.6;margin-bottom:10px;">One Node.js file. Free on Railway. Handles scheduling, SMS, Claude generation, reply parsing.</p>
+        <div class="field" style="margin-bottom:11px;">
+          <label>Railway backend URL</label>
+          <input type="text" id="cfg-backend" placeholder="https://organizer-back-production-xxxx.up.railway.app"/>
+        </div>
         <div style="background:var(--g1);border-radius:var(--r-sm);padding:9px 12px;font-size:11px;color:var(--ink3);font-family:var(--font-m);margin-bottom:11px;line-height:2;">✦ Morning / midday / evening SMS<br>✦ Per-task reminders at exact time<br>✦ Ad-hoc reminders at exact datetime<br>✦ Water SMS on interval<br>✦ "done 1" reply → checks off<br>✦ Claude generates every message<br>✦ Habit miss callouts at 6pm<br>✦ Twilio webhook /incoming</div>
         <button class="btn btn-prim" onclick="reqBackend()">Generate backend →</button>
       </div>
@@ -1102,13 +1106,83 @@ function resetW(){water=0;localStorage.setItem('acc_water',0);renderW();}
 function saveWG(){wGoal=parseInt(document.getElementById('wgi').value)||10;localStorage.setItem('acc_wgoal',wGoal);document.getElementById('wgs').textContent=wGoal;renderW();}
 
 // ─── SETUP ───────────────────────────────────────────────────────────────────
-function saveCfg(){cfg.sid=document.getElementById('cfg-sid').value.trim();cfg.token=document.getElementById('cfg-tok').value.trim();cfg.from=document.getElementById('cfg-from').value.trim();cfg.to=document.getElementById('cfg-to').value.trim();cfg.claudeKey=document.getElementById('cfg-claude').value.trim();localStorage.setItem('acc_cfg',JSON.stringify(cfg));document.getElementById('cfg-status').textContent='✓ Saved. Deploy backend to go live.';updateBadges();addLog('Credentials saved');document.getElementById('sms-d').className='sms-d live';document.getElementById('sms-lbl').textContent='SMS: credentials saved';}
-function updateBadges(){const ht=!!(cfg.sid&&cfg.from&&cfg.to);const hc=!!cfg.claudeKey;const ce=document.getElementById('st-creds');if(ce){ce.className='sbadge '+(ht?'s-ok':'s-warn');ce.innerHTML=`<span class="sdot"></span>${ht?'Saved':'Not saved'}`;}const cl=document.getElementById('st-claude');if(cl){cl.className='sbadge '+(hc?'s-ok':'s-warn');cl.innerHTML=`<span class="sdot"></span>${hc?'Saved':'Not saved'}`;}}
+function saveCfg(){
+  cfg.sid=document.getElementById('cfg-sid').value.trim();
+  cfg.token=document.getElementById('cfg-tok').value.trim();
+  cfg.from=document.getElementById('cfg-from').value.trim();
+  cfg.to=document.getElementById('cfg-to').value.trim();
+  cfg.claudeKey=document.getElementById('cfg-claude').value.trim();
+  cfg.backendUrl=(document.getElementById('cfg-backend').value.trim()).replace(/\/$/,'');
+  localStorage.setItem('acc_cfg',JSON.stringify(cfg));
+  document.getElementById('cfg-status').textContent='✓ Saved. Syncing to backend…';
+  updateBadges();addLog('Credentials saved');
+  document.getElementById('sms-d').className='sms-d live';
+  document.getElementById('sms-lbl').textContent='SMS: connected';
+  if(cfg.backendUrl) syncAll();
+}
+
+function updateBadges(){
+  const ht=!!(cfg.sid&&cfg.from&&cfg.to);
+  const hc=!!cfg.claudeKey;
+  const hb=!!cfg.backendUrl;
+  const ce=document.getElementById('st-creds');if(ce){ce.className='sbadge '+(ht?'s-ok':'s-warn');ce.innerHTML=`<span class="sdot"></span>${ht?'Saved':'Not saved'}`;}
+  const cl=document.getElementById('st-claude');if(cl){cl.className='sbadge '+(hc?'s-ok':'s-warn');cl.innerHTML=`<span class="sdot"></span>${hc?'Saved':'Not saved'}`;}
+  const sv=document.getElementById('st-server');if(sv){sv.className='sbadge '+(hb?'s-ok':'s-err');sv.innerHTML=`<span class="sdot"></span>${hb?'Connected':'Not set'}`;}
+  const ss=document.getElementById('st-sms');if(ss){ss.className='sbadge '+(hb&&ht?'s-ok':'s-err');ss.innerHTML=`<span class="sdot"></span>${hb&&ht?'Live':'Offline'}`;}
+}
+
+// ─── BACKEND SYNC ────────────────────────────────────────────────────────────
+async function pushToBackend(endpoint, data){
+  if(!cfg.backendUrl) return;
+  try{
+    await fetch(cfg.backendUrl+endpoint,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(data)
+    });
+  }catch(e){ console.warn('Backend sync failed:',e.message); }
+}
+
+async function syncAll(){
+  if(!cfg.backendUrl) return;
+  try{
+    await Promise.all([
+      pushToBackend('/tasks', tasks),
+      pushToBackend('/adhocs', adhocs),
+      pushToBackend('/habits', habits),
+      pushToBackend('/habitlog', habitLog),
+      pushToBackend('/daytasks', dayTasks),
+      pushToBackend('/water', {count:water, goal:wGoal}),
+    ]);
+    const statusEl = document.getElementById('cfg-status');
+    if(statusEl) statusEl.textContent='✓ Synced to backend — SMS active';
+    document.getElementById('sms-lbl').textContent='SMS: live';
+  }catch(e){ console.warn('Sync error:', e); }
+}
+
+// Override save to also push to backend
+const _origSave = save;
+function save(){
+  _origSave && _origSave();
+  localStorage.setItem('acc_tasks',    JSON.stringify(tasks));
+  localStorage.setItem('acc_goals',    JSON.stringify(goals));
+  localStorage.setItem('acc_habits',   JSON.stringify(habits));
+  localStorage.setItem('acc_habitlog', JSON.stringify(habitLog));
+  localStorage.setItem('acc_adhocs',   JSON.stringify(adhocs));
+  localStorage.setItem('acc_daytasks', JSON.stringify(dayTasks));
+  localStorage.setItem('acc_logs',     JSON.stringify(logs_));
+  localStorage.setItem('acc_tags',     JSON.stringify(tags));
+  localStorage.setItem('acc_water',    water);
+  localStorage.setItem('acc_wgoal',    wGoal);
+  localStorage.setItem('acc_streak',   streak);
+  if(cfg.backendUrl) syncAll();
+}
+
 async function previewClaude(){const key=document.getElementById('cfg-claude').value.trim();if(!key){document.getElementById('cfg-status').textContent='Enter your Claude API key first';return;}document.getElementById('cfg-status').textContent='Generating…';const missed=habits.filter(h=>!(habitLog[todayKey()]&&habitLog[todayKey()][h.id])).map(h=>h.name).join(', ')||'protein, GMAT prep, startup work';try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:200,messages:[{role:'user',content:`You are a brutally honest accountability coach texting Shreya. She missed: ${missed}. Goals: Wharton/HBS MBA, startup, IB/PE, GMAT 685. ONE SMS, 2-3 sentences, specific, stings a little.`}]})});const d=await r.json();const msg=d.content&&d.content[0]&&d.content[0].text;document.getElementById('cfg-status').textContent=msg?`Preview: "${msg}"`:'Connected — check key';}catch(e){document.getElementById('cfg-status').textContent='Error: '+e.message;}}
 function reqBackend(){const p=`Generate complete Node.js backend for my accountability app.\n\nTwilio: from +15715711237 to +15719690295\n\nFeatures:\n- SMS: 7am tasks, 12pm midday, 3pm nudge, 8:30pm summary\n- Per-task reminders: reminderAt (ISO), repeat (none/daily/weekday/weekly)\n- Ad-hoc reminders: {id,text,when,repeat,fired}\n- Calendar day tasks: dayTasks[date].tasks with optional reminderAt\n- Water SMS on 1hr interval\n- "done 1" reply handler\n- Habit miss callout at 6pm\n- Claude (claude-sonnet-4-20250514) generates EVERY message\n- GET/POST /tasks /adhocs /habits /daytasks /water — CORS enabled\n- State in JSON files\n- Twilio webhook /incoming\n- Railway deploy instructions\n\nContext for Claude: Shreya, Uber Strategy, MBA target Wharton/HBS/Columbia/Booth, startup, GMAT 685, IB/PE goals. Tone: brutally honest, specific, sometimes funny.`;if(window.sendPrompt)window.sendPrompt(p);else{navigator.clipboard.writeText(p).catch(()=>{});document.getElementById('cfg-status').textContent='Prompt copied — paste in chat!';}}
 
 // ─── LOG ─────────────────────────────────────────────────────────────────────
-function addLog(txt){logs_.unshift({text:txt,time:new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})});if(logs_.length>300)logs_.pop();save();renderLog();}
+function addLog(txt){logs_.unshift({text:txt,time:new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})});if(logs_.length>300)logs_.pop();localStorage.setItem('acc_logs',JSON.stringify(logs_));renderLog();}
 function renderLog(){const el=document.getElementById('log-list');if(!logs_.length){el.innerHTML='<div class="empty"><span class="ei">≡</span>No activity</div>';return;}el.innerHTML=logs_.map(l=>`<div class="li"><div class="ld"></div><div class="lt">${esc(l.text)}</div><div class="lti">${l.time}</div></div>`).join('');}
 
 // ─── CONFETTI ────────────────────────────────────────────────────────────────
@@ -1118,8 +1192,12 @@ function confetti(){const c=['rgba(255,255,255,0.7)','rgba(200,200,220,0.6)','rg
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fdt(iso){if(!iso)return'';try{return new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});}catch{return iso;}}
 
-// Init filter style
-document.addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('hf-all');if(el)el.style.background='var(--g3)';});
+// Init
+document.addEventListener('DOMContentLoaded',()=>{
+  const el=document.getElementById('hf-all');if(el)el.style.background='var(--g3)';
+  // restore backend URL field
+  if(cfg.backendUrl){const b=document.getElementById('cfg-backend');if(b)b.value=cfg.backendUrl;}
+});
 </script>
 </body>
 </html>
